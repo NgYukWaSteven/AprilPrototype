@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>BLE Data Sender</title>
+</head>
+<body>
+  <button id="connect">Connect</button>
+  <br><br>
+  <input id="data" type="text" placeholder="Enter data">
+  <button id="send">Send Data</button>
+
+  <script>
+    let device, server, service, characteristic;
+    const serviceUuid = '12345678-1234-5678-1234-56789abcdef0';
+    const characteristicUuid = 'abcdef01-1234-5678-1234-56789abcdef0';
+
+    document.getElementById('connect').addEventListener('click', async () => {
+      try {
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ services: [serviceUuid] }]
+        });
+        server = await device.gatt.connect();
+        service = await server.getPrimaryService(serviceUuid);
+        characteristic = await service.getCharacteristic(characteristicUuid);
+        console.log('Connected to BLE device');
+      } catch (error) {
+        console.error('Connection failed!', error);
+      }
+    });
+
+    document.getElementById('send').addEventListener('click', async () => {
+      const data = document.getElementById('data').value;
+      const encoder = new TextEncoder();
+      const encodedData = encoder.encode(data);
+      try {
+        await characteristic.writeValue(encodedData);
+        console.log('Data sent:', data);
+      } catch (error) {
+        console.error('Error sending data:', error);
+      }
+    });
+  </script>
+</body>
+</html>
