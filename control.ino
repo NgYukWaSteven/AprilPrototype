@@ -38,14 +38,14 @@ BLECharacteristic customCharacteristic(CHARACTERISTIC_UUID, BLERead | BLEWrite |
 LSM6DS3 abdomenIMU(I2C_MODE, 0x6A);    //I2C device address 0x6A
 MPU6050 bodyIMU; //Default address is 0x68 according to documentation
 
-//Create instance of clss DShot, in dshot600 mode
+//Create instance of class DShot, set to dshot600 mode
 DShot esc1(DShot::Mode::DSHOT600);
 
 //Throttle and target value for esc
 uint16_t throttle = 0;
 uint16_t target = 0;
 
-//Pre-allocate IMU raw values for abdomen and body
+//Pre-allocate storage for IMU raw values for abdomen (A) and body (B)
 int16_t axA, ayA, azA;
 int16_t gxA, gyA, gzA;
 
@@ -54,10 +54,10 @@ int16_t gxB, gyB, gzB;
 
 //Complimentary Filter Parameters
 // Constants
-float alpha = 0.98;             // Complementary filter constant
+float alpha = 0.98;             // Complementary filter constant, tuneable
 float dt = 0.01;                // Time step (s), adjust to match your sampling rate (e.g., 10ms = 0.01s)
 
-// Variables to store angles
+// Pre-allocate storage for pitch and roll for abdomen (A) and body (B)
 float pitchA = 0.0;
 float rollA = 0.0;
 float pitchB = 0.0;
@@ -143,7 +143,10 @@ void loop() {
   }
 }
 
+//This is used to ramp up or down the motor smoothly, target can be anything between 0 and 2047
 void throttleRamp(target) {
+  if (target>2047)
+      target = 2047;
   if (throttle<48){
     throttle = 48;
   }
