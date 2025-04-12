@@ -9,19 +9,19 @@
 //  Description: 
 //
 /*******************************************************************************/
-
 #include "Wire.h"
 #include "math.h"
 #include "I2Cdev.h"
 
 //IMU Dependencies
 #include "LSM6DS3.h"
-#include "MPU6050.h"
+#include "Adafruit_MPU6050.h"
+#include "Adafruit_Sensor.h"
 
-//DShot
-#include "DShot.h"
+#include "Servo.h"
 
-//BLE
+/* Bluetooth is not working yet...
+//BLE library (Native)
 #include "ArduinoBLE.h"
 
 //BLUE Service and Characteristic UUID
@@ -32,14 +32,20 @@
 // The characteristic is set to allow reading, writing, and notifications.
 BLEService customService(SERVICE_UUID);
 BLECharacteristic customCharacteristic(CHARACTERISTIC_UUID, BLERead | BLEWrite | BLENotify, 20);
+*/
 
 //Create a instance of class LSM6DS3
 //This is the embedded IMU on the Seeeduino nrf chip on the abdomen
 LSM6DS3 abdomenIMU(I2C_MODE, 0x6A);    //I2C device address 0x6A
-MPU6050 bodyIMU; //Default address is 0x68 according to documentation
+Adafruit_MPU6050 bodyIMU; //Default address is 0x68 according to documentation
 
+/*
 //Create instance of class DShot, set to dshot600 mode
 DShot esc1(DShot::Mode::DSHOT600);
+*/
+
+//Since DShot library doesn't work with ARM or mbed architecture we use Servo library because they work with the same principle anyway.
+Servo esc;
 
 //Throttle and target value for esc
 uint16_t throttle = 0;
@@ -53,7 +59,7 @@ int16_t axB, ayB, azB;
 int16_t gxB, gyB, gzB;
 
 //Complimentary Filter Parameters
-// Constants
+//Constants
 float alpha = 0.98;             // Complementary filter constant, tuneable
 float dt = 0.01;                // Time step (s), adjust to match your sampling rate (e.g., 10ms = 0.01s)
 
@@ -65,11 +71,47 @@ float rollB = 0.0;
 
 unsigned long lastTime = 0;
 
-void setup() {
-  Serial.begin(115200);
-  esc1.attach(7); //Attach esc signal wire to pin 7
-  esc1.setThrottle(throttle); //Set throttle (Initially 0)
+void setup() {//Leave everything in set up as is
+  delay(5000); // Give some time for Serial Monitor to catch up
 
+  //Configures I2C
+  #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+    Wire.begin(); 
+  #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
+    Fastwire::setup(400, true);
+  #endif
+
+  Serial.begin(115200); //Begins serial
+
+  while (!Serial); //Gets stuck here if serial doesn't start properly
+  
+  //Checks abdomenIMU is ok
+  if (abdomenIMU.begin() != 0) {
+    Serial.println("Device error");
+  } else {
+    Serial.println("Device OK!");
+  }
+
+  //Checks bodyIMU is ok
+  if (!bodyIMU.begin()) {
+    Serial.println("Failed to find MPU6050 chip");
+    while (1) {
+      delay(10);
+    }
+  }
+
+  //Some MPU6050 specific configuration
+  bodyIMU.setAccelerometerRange(MPU6050_RANGE_16_G);
+  bodyIMU.setGyroRange(MPU6050_RANGE_250_DEG);
+  bodyIMU.setFilterBandwidth(MPU6050_BAND_21_HZ);
+  Serial.println("");
+
+  //Initialise esc
+  esc.attach(7);
+  esc.writeMicroseconds(1000);
+  delay(1000);
+
+  /* BLE not working yet...
   while (!Serial);
 
   // Initialize BLE hardware
@@ -92,8 +134,55 @@ void setup() {
   // Start advertising
   BLE.advertise();
   Serial.println("BLE device is now advertising...");
+  */
 }
 
+void loop() {
+  // Time calculation
+  unsigned long currentTime = millis();
+  dt = (currentTime - lastTime) / 1000.0;  // convert ms to seconds
+  lastTime = currentTime;
+
+  //Get body and abdomen raw values
+  sensors_event_t a, g, temp;
+  bodyIMU.getEvent(&a, &g, &temp);
+  axA = abdomenIMU.readFloatAccelX();
+  ayA = abdomenIMU.readFloatAccelY();
+  azA = abdomenIMU.readFloatAccelZ();
+  gxA = abdomenIMU.readFloatGyroX();
+  gyA = abdomenIMU.readFloatGyroY();
+  gzA = abdomenIMU.readFloatGyroZ();
+  axB = a.acceleration.x;
+  ayB = a.acceleration.y;
+  azB = a.acceleration.z;
+  gxB = g.gyro.x;
+  gyB = g.gyro.y;
+  gzB = g.gyro.z;
+  //
+
+  //Complimentary Filter for abdomen and body pitch and roll
+  // Calculate pitch and roll from accelerometer
+  float accPitchA = atan2(ayA, sqrt(axA * axA + azA * azA)) * 180.0 / PI;
+  float accRollA  = atan2(-axA, azA) * 180.0 / PI;
+  float accPitchB = atan2(ayB, sqrt(axB * axB + azB * azB)) * 180.0 / PI;
+  float accRollB  = atan2(-axB, azB) * 180.0 / PI;
+
+  //Resulting pitch and roll for abdomen and body
+  pitchA = alpha * (pitchA + gxA * dt) + (1 - alpha) * accPitchA;
+  rollA  = alpha * (rollA  + gyA * dt) + (1 - alpha) * accRollA;
+  pitchB = alpha * (pitchB + gxB * dt) + (1 - alpha) * accPitchB;
+  rollB = alpha * (rollB  + gyB * dt) + (1 - alpha) * accRollB;
+
+  Serial.print(pitchA); Serial.print(",");
+  Serial.print(rollA); Serial.print(",");
+  Serial.print(pitchB); Serial.print(",");
+  Serial.println(rollB);
+  delay(1);
+}
+
+
+//Ignore these for now, they are wireless communication code that I haven't worked through yet
+/*
 void loop() {
   BLEDevice central = BLE.central();
 
@@ -142,9 +231,11 @@ void loop() {
     Serial.println(central.address());
   }
 }
+*/
 
 //This is used to ramp up or down the motor smoothly, target can be anything between 0 and 2047
-void throttleRamp(target) {
+/*
+int throttleRamp(target) {
   if (target>2047)
       target = 2047;
   if (throttle<48){
@@ -162,4 +253,4 @@ void throttleRamp(target) {
     }
   }
 }
-
+*/
