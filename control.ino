@@ -6,7 +6,12 @@
 //	Date: 	       Apr, 2025
 //	Version:       v1.0
 //
-//  Description: 
+//  Description: This is the complete control script for the April Prototype
+//
+//
+//
+//
+//
 //
 /*******************************************************************************/
 #include "Wire.h"
@@ -108,7 +113,7 @@ void setup() {//Leave everything in set up as is
 
   //Initialise esc
   esc.attach(7);
-  esc.writeMicroseconds(1000);
+  esc.writeMicroseconds(1200);
   delay(1000);
 
   /* BLE not working yet...
@@ -167,17 +172,18 @@ void loop() {
   float accPitchB = atan2(ayB, sqrt(axB * axB + azB * azB)) * 180.0 / PI;
   float accRollB  = atan2(-axB, azB) * 180.0 / PI;
 
-  //Resulting pitch and roll for abdomen and body
+  //Resulting pitch and roll for abdomen and body, you may use these directly in controls
   pitchA = alpha * (pitchA + gxA * dt) + (1 - alpha) * accPitchA;
   rollA  = alpha * (rollA  + gyA * dt) + (1 - alpha) * accRollA;
   pitchB = alpha * (pitchB + gxB * dt) + (1 - alpha) * accPitchB;
   rollB = alpha * (rollB  + gyB * dt) + (1 - alpha) * accRollB;
 
+  //Print pitch and roll in a way that can be shown on serial plotter
   Serial.print(pitchA); Serial.print(",");
   Serial.print(rollA); Serial.print(",");
   Serial.print(pitchB); Serial.print(",");
   Serial.println(rollB);
-  delay(1);
+  delay(1); //Small delay, 1ms
 }
 
 
