@@ -103,7 +103,7 @@ void setup() {//Leave everything in set up as is
     Serial.println("Starting BLE failed!");
     while (1);
   }
-  BLE.setLocalName("ArduinoControl");
+  BLE.setLocalName("April Prototype V1.0");
   BLE.setAdvertisedService(controlService);
   controlService.addCharacteristic(dataCharacteristic);
   BLE.addService(controlService);
@@ -111,7 +111,6 @@ void setup() {//Leave everything in set up as is
   BLE.advertise();
   Serial.println("BLE Initialized and advertising");
 }
-
 
 void loop() {
   // Poll BLE events
@@ -128,7 +127,7 @@ void loop() {
     Serial.print("BLE Received: ");
     Serial.println(receivedValue);
     // Update throttle with received value (as an example)
-    throttle = receivedValue;
+    alpha = receivedValue;
   }
   
   // Time calculation
@@ -151,7 +150,6 @@ void loop() {
   gxB = g.gyro.x;
   gyB = g.gyro.y;
   gzB = g.gyro.z;
-  //
 
   //Complimentary Filter for abdomen and body pitch and roll
   // Calculate pitch and roll from accelerometer
@@ -172,7 +170,7 @@ void loop() {
   Serial.print(pitchB); Serial.print(",");
   Serial.println(rollB);
   
-  // Send sensor data over BLE as a CSV string that now includes the timestamp.
+  // Send IMU sensor data over BLE as a CSV string that now includes the timestamp.
   char bleData[64];
   snprintf(bleData, sizeof(bleData), "%lu,%.2f,%.2f,%.2f,%.2f", currentTime, pitchA, rollA, pitchB, rollB);
   dataCharacteristic.writeValue(bleData);
