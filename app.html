@@ -1,43 +1,149 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>BLE Data Sender</title>
+  <meta charset="UTF-8">
+  <title>Arduino BLE Web App</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+      max-width: 800px;
+    }
+    h1, h2 {
+      color: #333;
+    }
+    button {
+      padding: 8px 16px;
+      margin: 5px;
+      font-size: 1rem;
+    }
+    input[type="text"] {
+      padding: 8px;
+      font-size: 1rem;
+      width: 250px;
+      margin-right: 10px;
+    }
+    textarea {
+      width: 100%;
+      font-size: 1rem;
+      padding: 8px;
+      margin-top: 10px;
+      box-sizing: border-box;
+      resize: vertical;
+    }
+    .status {
+      margin: 10px 0;
+      color: green;
+    }
+    .error {
+      color: red;
+    }
+  </style>
 </head>
 <body>
-  <button id="connect">Connect</button>
-  <br><br>
-  <input id="data" type="text" placeholder="Enter data">
-  <button id="send">Send Data</button>
+  <h1>Arduino BLE Web App</h1>
+  <button id="connectBtn">Connect to Arduino</button>
+  <div id="status" class="status"></div>
+
+  <h2>Send Data</h2>
+  <input type="text" id="sendData" placeholder="Enter data to send">
+  <button id="sendBtn">Send</button>
+
+  <h2>Received Data</h2>
+  <textarea id="receivedData" rows="10" readonly></textarea>
+  <br>
+  <button id="saveBtn">Save Data as CSV</button>
 
   <script>
-    let device, server, service, characteristic;
-    const serviceUuid = 'FWMAV';
-    const characteristicUuid = 'FWMAV';
+    // UUIDs must match the ones used on the Arduino.
+    const serviceUuid = '19b10000-e8f2-537e-4f6c-d104768a1214';
+    const characteristicUuid = '19b10001-e8f2-537e-4f6c-d104768a1214';
 
-    document.getElementById('connect').addEventListener('click', async () => {
+    let bleDevice = null;
+    let characteristic = null;
+    let receivedDataLog = "";
+
+    const connectBtn = document.getElementById('connectBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const sendDataInput = document.getElementById('sendData');
+    const receivedDataTextArea = document.getElementById('receivedData');
+    const statusDiv = document.getElementById('status');
+
+    connectBtn.addEventListener('click', async () => {
       try {
-        device = await navigator.bluetooth.requestDevice({
+        statusDiv.textContent = "Requesting Bluetooth device...";
+        bleDevice = await navigator.bluetooth.requestDevice({
           filters: [{ services: [serviceUuid] }]
         });
-        server = await device.gatt.connect();
-        service = await server.getPrimaryService(serviceUuid);
+
+        bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+        const server = await bleDevice.gatt.connect();
+        const service = await server.getPrimaryService(serviceUuid);
         characteristic = await service.getCharacteristic(characteristicUuid);
-        console.log('Connected to BLE device');
-      } catch (error) {
-        console.error('Connection failed!', error);
+
+        // Start receiving notifications from the Arduino
+        await characteristic.startNotifications();
+        characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
+
+        statusDiv.textContent = "Connected and notifications started!";
+        console.log("Connected to device:", bleDevice.name);
+      } catch(error) {
+        console.error("Connection failed:", error);
+        statusDiv.textContent = "Error: " + error;
+        statusDiv.classList.add("error");
       }
     });
 
-    document.getElementById('send').addEventListener('click', async () => {
-      const data = document.getElementById('data').value;
-      const encoder = new TextEncoder();
-      const encodedData = encoder.encode(data);
-      try {
-        await characteristic.writeValue(encodedData);
-        console.log('Data sent:', data);
-      } catch (error) {
-        console.error('Error sending data:', error);
+    function onDisconnected(event) {
+      const device = event.target;
+      statusDiv.textContent = "Device disconnected: " + device.name;
+      console.log('Disconnected from device:', device.name);
+    }
+
+    function handleCharacteristicValueChanged(event) {
+      // Read the incoming data as a string
+      const value = event.target.value;
+      const decoder = new TextDecoder('utf-8');
+      const strValue = decoder.decode(value);
+
+      // Append the received string to the log and update textarea
+      receivedDataLog += strValue + "\n";
+      receivedDataTextArea.value = receivedDataLog;
+      console.log("Received:", strValue);
+    }
+
+    sendBtn.addEventListener('click', async () => {
+      const dataToSend = sendDataInput.value;
+      if (!dataToSend) {
+        alert("Please enter some data to send.");
+        return;
       }
+      if (!characteristic) {
+        alert("Not connected to a device.");
+        return;
+      }
+      try {
+        // Encode the text into a Uint8Array and write it to the BLE characteristic
+        const encoder = new TextEncoder();
+        const data = encoder.encode(dataToSend);
+        await characteristic.writeValue(data);
+        console.log("Sent:", dataToSend);
+      } catch(error) {
+        console.error("Failed to send data:", error);
+      }
+    });
+
+    saveBtn.addEventListener('click', () => {
+      // Create and download a CSV file with the logged data
+      const blob = new Blob([receivedDataLog], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "received_data.csv";
+      link.click();
+      URL.revokeObjectURL(url);
     });
   </script>
 </body>
