@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>April Prototype Wireless Control Interface</title>
+  <title>April Prototype Control Interface</title>
+  <!-- Include Chart.js from a CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body {
       font-family: sans-serif;
@@ -38,21 +40,29 @@
     .error {
       color: red;
     }
+    #imuChart {
+      max-width: 100%;
+      height: 300px;
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
-  <h1>April Prototype Wireless Control Interface</h1>
-  <button id="connectBtn">Connect to drone</button>
+  <h1>April Prototype Control Interface by Steven Ng</h1>
+  <button id="connectBtn">Connect to Arduino</button>
   <div id="status" class="status"></div>
 
   <h2>Send Data</h2>
   <input type="text" id="sendData" placeholder="Enter data to send">
   <button id="sendBtn">Send</button>
 
-  <h2>Received Data</h2>
+  <h2>Received Data (CSV Log)</h2>
   <textarea id="receivedData" rows="10" readonly></textarea>
   <br>
   <button id="saveBtn">Save Data as CSV</button>
+
+  <h2>IMU Data Plot (20-sec window)</h2>
+  <canvas id="imuChart"></canvas>
 
   <script>
     // UUIDs must match the ones used on the Arduino.
@@ -63,12 +73,98 @@
     let characteristic = null;
     let receivedDataLog = "";
 
+    // References to DOM elements
     const connectBtn = document.getElementById('connectBtn');
     const sendBtn = document.getElementById('sendBtn');
     const saveBtn = document.getElementById('saveBtn');
     const sendDataInput = document.getElementById('sendData');
     const receivedDataTextArea = document.getElementById('receivedData');
     const statusDiv = document.getElementById('status');
+
+    // Set up Chart.js line chart (using a linear time axis in seconds)
+    const ctx = document.getElementById('imuChart').getContext('2d');
+    const imuChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [
+          {
+            label: 'Pitch A',
+            borderColor: 'red',
+            data: [],
+            fill: false,
+            tension: 0.1
+          },
+          {
+            label: 'Roll A',
+            borderColor: 'blue',
+            data: [],
+            fill: false,
+            tension: 0.1
+          },
+          {
+            label: 'Pitch B',
+            borderColor: 'green',
+            data: [],
+            fill: false,
+            tension: 0.1
+          },
+          {
+            label: 'Roll B',
+            borderColor: 'orange',
+            data: [],
+            fill: false,
+            tension: 0.1
+          }
+        ]
+      },
+      options: {
+        scales: {
+          x: {
+            type: 'linear',
+            title: {
+              display: true,
+              text: 'Time (s)'
+            },
+            ticks: {
+              autoSkip: true,
+              maxTicksLimit: 10
+            }
+          },
+          y: {
+            title: {
+              display: true,
+              text: 'Angle (°)'
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            display: true
+          }
+        },
+        animation: false
+      }
+    });
+
+    // Function to add a data point and maintain a 20-second window.
+    function addDataPoint(timestampMs, pitchA_val, rollA_val, pitchB_val, rollB_val) {
+      // Convert timestamp from milliseconds to seconds.
+      let timeSec = timestampMs / 1000;
+
+      // Push new data points for all four datasets.
+      imuChart.data.datasets[0].data.push({ x: timeSec, y: pitchA_val });
+      imuChart.data.datasets[1].data.push({ x: timeSec, y: rollA_val });
+      imuChart.data.datasets[2].data.push({ x: timeSec, y: pitchB_val });
+      imuChart.data.datasets[3].data.push({ x: timeSec, y: rollB_val });
+
+      // Remove data points older than 20 seconds from the current point.
+      imuChart.data.datasets.forEach(dataset => {
+        while (dataset.data.length > 0 && (timeSec - dataset.data[0].x) > 20) {
+          dataset.data.shift();
+        }
+      });
+      imuChart.update();
+    }
 
     connectBtn.addEventListener('click', async () => {
       try {
@@ -103,15 +199,27 @@
     }
 
     function handleCharacteristicValueChanged(event) {
-      // Read the incoming data as a string
+      // Decode the incoming BLE data as a string
       const value = event.target.value;
       const decoder = new TextDecoder('utf-8');
       const strValue = decoder.decode(value);
 
-      // Append the received string to the log and update textarea
+      // Append the received string to the log and update the textarea.
       receivedDataLog += strValue + "\n";
       receivedDataTextArea.value = receivedDataLog;
       console.log("Received:", strValue);
+
+      // Parse CSV string. Expected format: timestamp,pitchA,rollA,pitchB,rollB
+      const tokens = strValue.split(",");
+      if (tokens.length >= 5) {
+        const timestamp = parseInt(tokens[0]);
+        const pitchA_val = parseFloat(tokens[1]);
+        const rollA_val  = parseFloat(tokens[2]);
+        const pitchB_val = parseFloat(tokens[3]);
+        const rollB_val  = parseFloat(tokens[4]);
+        // Update the chart with the new data point
+        addDataPoint(timestamp, pitchA_val, rollA_val, pitchB_val, rollB_val);
+      }
     }
 
     sendBtn.addEventListener('click', async () => {
@@ -136,7 +244,7 @@
     });
 
     saveBtn.addEventListener('click', () => {
-      // Create and download a CSV file with the logged data
+      // Create and download a CSV file with the logged data.
       const blob = new Blob([receivedDataLog], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
