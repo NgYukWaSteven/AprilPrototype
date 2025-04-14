@@ -1,17 +1,12 @@
 /*****************************************************************************/
 //  control.ino
 //  Hardware:      MPU6050, Seeedduino XIAO nRF52840 Sense, BLHeli-S 7A ESC, DYS BE1102 2-3S Mini Brushless Motor 10000KV
-//	Arduino IDE:   Arduino-2.3.4
-//	Author:	       Steven Ng, Shaun Tang
-//	Date: 	       Apr, 2025
-//	Version:       v1.0
+//  Arduino IDE:   Arduino-2.3.4
+//  Author:        Steven Ng, Shaun Tang
+//  Date:          Apr, 2025
+//  Version:       v1.0
 //
 //  Description: This is the complete control script for the April Prototype
-//
-//
-//
-//
-//
 //
 /*******************************************************************************/
 #include "Wire.h"
@@ -25,19 +20,8 @@
 
 #include "Servo.h"
 
-/* Bluetooth is not working yet...
-//BLE library (Native)
-#include "ArduinoBLE.h"
-
-//BLUE Service and Characteristic UUID
-#define SERVICE_UUID         "12345678-1234-5678-1234-56789abcdef0"
-#define CHARACTERISTIC_UUID  "abcdef01-1234-5678-1234-56789abcdef0"
-
-// Create the BLE Service and Characteristic.
-// The characteristic is set to allow reading, writing, and notifications.
-BLEService customService(SERVICE_UUID);
-BLECharacteristic customCharacteristic(CHARACTERISTIC_UUID, BLERead | BLEWrite | BLENotify, 20);
-*/
+// Add ArduinoBLE library for BLE functionality
+#include <ArduinoBLE.h>
 
 //Create a instance of class LSM6DS3
 //This is the embedded IMU on the Seeeduino nrf chip on the abdomen
@@ -75,6 +59,11 @@ float pitchB = 0.0;
 float rollB = 0.0;
 
 unsigned long lastTime = 0;
+
+// BLE Service and Characteristic definitions
+BLEService controlService("19B10000-E8F2-537E-4F6C-D104768A1214");
+// Increased data length to 64 bytes to handle the additional timestamp data.
+BLECharacteristic dataCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLEWrite | BLENotify, 64);
 
 void setup() {//Leave everything in set up as is
   delay(5000); // Give some time for Serial Monitor to catch up
@@ -115,34 +104,40 @@ void setup() {//Leave everything in set up as is
   esc.attach(7);
   esc.writeMicroseconds(1200);
   delay(1000);
-
-  /* BLE not working yet...
-  while (!Serial);
-
-  // Initialize BLE hardware
+  
+  // Initialize BLE
   if (!BLE.begin()) {
-    Serial.println("Failed to initialize BLE!");
+    Serial.println("Starting BLE failed!");
     while (1);
   }
-
-  // Set the local name and advertise the service
-  BLE.setLocalName("Flapper001");
-  BLE.setAdvertisedService(customService);
-
-  // Add the characteristic to the service, then add the service
-  customService.addCharacteristic(customCharacteristic);
-  BLE.addService(customService);
-
-  // Optionally set an initial value for the characteristic
-  customCharacteristic.writeValue("Hello, Flapper");
-
-  // Start advertising
+  BLE.setLocalName("ArduinoControl");
+  BLE.setAdvertisedService(controlService);
+  controlService.addCharacteristic(dataCharacteristic);
+  BLE.addService(controlService);
+  dataCharacteristic.writeValue("Ready");
   BLE.advertise();
-  Serial.println("BLE device is now advertising...");
-  */
+  Serial.println("BLE Initialized and advertising");
 }
 
+
 void loop() {
+  // Poll BLE events
+  BLE.poll();
+  
+  // Check if new data has been written to the BLE characteristic
+  if (dataCharacteristic.written()) {
+    // Assume the incoming data is an ASCII string representing a number
+    int len = dataCharacteristic.valueLength();
+    char buffer[21]; // Buffer for incoming data (20 characters max + null terminator)
+    memcpy(buffer, dataCharacteristic.value(), len);
+    buffer[len] = '\0';
+    int receivedValue = atoi(buffer);
+    Serial.print("BLE Received: ");
+    Serial.println(receivedValue);
+    // Update throttle with received value (as an example)
+    throttle = receivedValue;
+  }
+  
   // Time calculation
   unsigned long currentTime = millis();
   dt = (currentTime - lastTime) / 1000.0;  // convert ms to seconds
@@ -183,80 +178,11 @@ void loop() {
   Serial.print(rollA); Serial.print(",");
   Serial.print(pitchB); Serial.print(",");
   Serial.println(rollB);
+  
+  // Send sensor data over BLE as a CSV string that now includes the timestamp.
+  char bleData[64];
+  snprintf(bleData, sizeof(bleData), "%lu,%.2f,%.2f,%.2f,%.2f", currentTime, pitchA, rollA, pitchB, rollB);
+  dataCharacteristic.writeValue(bleData);
+  
   delay(1); //Small delay, 1ms
 }
-
-
-//Ignore these for now, they are wireless communication code that I haven't worked through yet
-/*
-void loop() {
-  BLEDevice central = BLE.central();
-
-  if (central) {
-    Serial.print("Connected to central: ");
-    Serial.println(central.address());
-
-    // While the central is connected:
-    while (central.connected()) {
-      // Check if the characteristic was written to
-      if (customCharacteristic.written()) {
-        // Read the incoming value
-        String receivedData = customCharacteristic.value();
-        Serial.print("Received data: ");
-        Serial.println(receivedData);
-      }
-      // Time calculation
-      unsigned long currentTime = millis();
-      dt = (currentTime - lastTime) / 1000.0;  // convert ms to seconds
-      lastTime = currentTime;
-
-      //Get body and abdomen raw values
-      bodyIMU.getMotion6(&axB, &ayB, &azB, &gxB, &gyB, &gzB);
-      axA = myIMU.readFloatAccelX();
-      ayA = myIMU.readFloatAccelY();
-      azA = myIMU.readFloatAccelZ();
-      gxA = myIMU.readFloatGyroX();
-      gyA = myIMU.readFloatGyroY();
-      gzA = myIMU.readFloatGyroZ();
-
-      //Complimentary Filter for abdomen and body pitch and roll
-      // Calculate pitch and roll from accelerometer
-      float accPitchA = atan2(ayA, sqrt(axA * axA + azA * azA)) * 180.0 / PI;
-      float accRollA  = atan2(-axA, azA) * 180.0 / PI;
-      float accPitchB = atan2(ayB, sqrt(axB * axB + azB * azB)) * 180.0 / PI;
-      float accRollB  = atan2(-axB, azB) * 180.0 / PI;
-
-        // Integrate gyro data
-      pitchA = alpha * (pitch + gyA * dt) + (1 - alpha) * accPitchA;
-      rollA  = alpha * (roll  + gxA * dt) + (1 - alpha) * accRollA;
-      pitchB = alpha * (pitch + gyB * dt) + (1 - alpha) * accPitchB;
-      rollB = alpha * (roll  + gxB * dt) + (1 - alpha) * accRollB;
-    }
-
-    Serial.print("Disconnected from central: ");
-    Serial.println(central.address());
-  }
-}
-*/
-
-//This is used to ramp up or down the motor smoothly, target can be anything between 0 and 2047
-/*
-int throttleRamp(target) {
-  if (target>2047)
-      target = 2047;
-  if (throttle<48){
-    throttle = 48;
-  }
-  if (target<=48){
-    esc1.setThrottle(target);
-  }else{
-    if (target>throttle){
-      throttle ++;
-      esc1.setThrottle(throttle);
-    }else if (target<throttle){
-      throttle --;
-      esc1.setThrottle(throttle);
-    }
-  }
-}
-*/
