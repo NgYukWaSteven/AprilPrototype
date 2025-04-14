@@ -14,8 +14,8 @@
 #include "I2Cdev.h"
 
 //IMU Dependencies
-#include "LSM6DS3.h"
-#include "Adafruit_MPU6050.h"
+#include "LSM6DS3.h" //This is the abdomen IMU
+#include "Adafruit_MPU6050.h" //This is the body IMU
 #include "Adafruit_Sensor.h"
 
 //General ESC library based on the official arduino servo library
@@ -24,20 +24,16 @@
 // Add ArduinoBLE library for BLE functionality
 #include <ArduinoBLE.h>
 
-//Create a instance of class LSM6DS3
-//This is the embedded IMU on the Seeeduino nrf chip on the abdomen
+//Create IMU instances
 LSM6DS3 abdomenIMU(I2C_MODE, 0x6A);    //I2C device address 0x6A
 Adafruit_MPU6050 bodyIMU; //Default address is 0x68 according to documentation
 
+//Definitions for the ESC, see ESC_Calibration.ino for calibrations in the ESC.h library examples
 #define SPEED_MIN (1000)                                  // Set the Minimum Speed in microseconds
 #define SPEED_MAX (2000)                                  // Set the Minimum Speed in microseconds
 
 ESC myESC (7, SPEED_MIN, SPEED_MAX, 500);                 // ESC_Name (ESC PIN, Minimum Value, Maximum Value, Default Speed, Arm Value)
 int oESC;    
-
-//Throttle and target value for esc
-uint16_t throttle = 0;
-uint16_t target = 0;
 
 //Pre-allocate storage for IMU raw values for abdomen (A) and body (B)
 int16_t axA, ayA, azA;
