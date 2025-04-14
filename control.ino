@@ -18,7 +18,8 @@
 #include "Adafruit_MPU6050.h"
 #include "Adafruit_Sensor.h"
 
-#include "Servo.h"
+//General ESC library based on the official arduino servo library
+#include "ESC.h"
 
 // Add ArduinoBLE library for BLE functionality
 #include <ArduinoBLE.h>
@@ -28,13 +29,11 @@
 LSM6DS3 abdomenIMU(I2C_MODE, 0x6A);    //I2C device address 0x6A
 Adafruit_MPU6050 bodyIMU; //Default address is 0x68 according to documentation
 
-/*
-//Create instance of class DShot, set to dshot600 mode
-DShot esc1(DShot::Mode::DSHOT600);
-*/
+#define SPEED_MIN (1000)                                  // Set the Minimum Speed in microseconds
+#define SPEED_MAX (2000)                                  // Set the Minimum Speed in microseconds
 
-//Since DShot library doesn't work with ARM or mbed architecture we use Servo library because they work with the same principle anyway.
-Servo esc;
+ESC myESC (7, SPEED_MIN, SPEED_MAX, 500);                 // ESC_Name (ESC PIN, Minimum Value, Maximum Value, Default Speed, Arm Value)
+int oESC;    
 
 //Throttle and target value for esc
 uint16_t throttle = 0;
@@ -100,10 +99,8 @@ void setup() {//Leave everything in set up as is
   bodyIMU.setFilterBandwidth(MPU6050_BAND_21_HZ);
   Serial.println("");
 
-  //Initialise esc
-  esc.attach(7);
-  esc.writeMicroseconds(1200);
-  delay(1000);
+  //Arm BLHeli-S ESC
+  myESC.arm();     
   
   // Initialize BLE
   if (!BLE.begin()) {
