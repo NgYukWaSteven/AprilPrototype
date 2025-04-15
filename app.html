@@ -2,14 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>April Prototype Control Interface</title>
+  <title>Arduino BLE IMU Plotter & 3D Drone Model</title>
   <!-- Include Chart.js from a CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Include Three.js from a CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <style>
     body {
       font-family: sans-serif;
       margin: 20px;
-      max-width: 800px;
+      max-width: 900px;
     }
     h1, h2 {
       color: #333;
@@ -45,10 +47,17 @@
       height: 300px;
       margin-top: 20px;
     }
+    /* Container for the Three.js drone model */
+    #droneContainer {
+      width: 800px;
+      height: 600px;
+      border: 1px solid #ccc;
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
-  <h1>April Prototype Control Interface by Steven Ng</h1>
+  <h1>Arduino BLE IMU Plotter & 3D Drone Model</h1>
   <button id="connectBtn">Connect to Arduino</button>
   <div id="status" class="status"></div>
 
@@ -64,6 +73,9 @@
   <h2>IMU Data Plot (20-sec window)</h2>
   <canvas id="imuChart"></canvas>
 
+  <h2>3D Drone Model</h2>
+  <div id="droneContainer"></div>
+
   <script>
     // UUIDs must match the ones used on the Arduino.
     const serviceUuid = '19b10000-e8f2-537e-4f6c-d104768a1214';
@@ -73,7 +85,11 @@
     let characteristic = null;
     let receivedDataLog = "";
 
-    // References to DOM elements
+    // Global sensor values (from the Arduino)
+    // For the abdomen: pitchA, rollA; for the body: pitchB, rollB.
+    let globalPitchA = 0, globalRollA = 0, globalPitchB = 0, globalRollB = 0;
+
+    // DOM elements
     const connectBtn = document.getElementById('connectBtn');
     const sendBtn = document.getElementById('sendBtn');
     const saveBtn = document.getElementById('saveBtn');
@@ -146,18 +162,18 @@
       }
     });
 
-    // Function to add a data point and maintain a 20-second window.
+    // Function to add a data point to the chart and maintain a 20-second window.
     function addDataPoint(timestampMs, pitchA_val, rollA_val, pitchB_val, rollB_val) {
       // Convert timestamp from milliseconds to seconds.
       let timeSec = timestampMs / 1000;
 
-      // Push new data points for all four datasets.
+      // Append data points for each dataset.
       imuChart.data.datasets[0].data.push({ x: timeSec, y: pitchA_val });
       imuChart.data.datasets[1].data.push({ x: timeSec, y: rollA_val });
       imuChart.data.datasets[2].data.push({ x: timeSec, y: pitchB_val });
       imuChart.data.datasets[3].data.push({ x: timeSec, y: rollB_val });
 
-      // Remove data points older than 20 seconds from the current point.
+      // Remove data points older than 20 seconds.
       imuChart.data.datasets.forEach(dataset => {
         while (dataset.data.length > 0 && (timeSec - dataset.data[0].x) > 20) {
           dataset.data.shift();
@@ -179,13 +195,13 @@
         const service = await server.getPrimaryService(serviceUuid);
         characteristic = await service.getCharacteristic(characteristicUuid);
 
-        // Start receiving notifications from the Arduino
+        // Start receiving notifications from the Arduino.
         await characteristic.startNotifications();
         characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
 
         statusDiv.textContent = "Connected and notifications started!";
         console.log("Connected to device:", bleDevice.name);
-      } catch(error) {
+      } catch (error) {
         console.error("Connection failed:", error);
         statusDiv.textContent = "Error: " + error;
         statusDiv.classList.add("error");
@@ -199,7 +215,7 @@
     }
 
     function handleCharacteristicValueChanged(event) {
-      // Decode the incoming BLE data as a string
+      // Decode the incoming BLE data as a UTF-8 string.
       const value = event.target.value;
       const decoder = new TextDecoder('utf-8');
       const strValue = decoder.decode(value);
@@ -217,8 +233,15 @@
         const rollA_val  = parseFloat(tokens[2]);
         const pitchB_val = parseFloat(tokens[3]);
         const rollB_val  = parseFloat(tokens[4]);
-        // Update the chart with the new data point
+
+        // Update the chart with the new data point.
         addDataPoint(timestamp, pitchA_val, rollA_val, pitchB_val, rollB_val);
+
+        // Update global sensor values for 3D model updating.
+        globalPitchA = pitchA_val;
+        globalRollA  = rollA_val;
+        globalPitchB = pitchB_val;
+        globalRollB  = rollB_val;
       }
     }
 
@@ -233,12 +256,11 @@
         return;
       }
       try {
-        // Encode the text into a Uint8Array and write it to the BLE characteristic
         const encoder = new TextEncoder();
         const data = encoder.encode(dataToSend);
         await characteristic.writeValue(data);
         console.log("Sent:", dataToSend);
-      } catch(error) {
+      } catch (error) {
         console.error("Failed to send data:", error);
       }
     });
@@ -253,6 +275,69 @@
       link.click();
       URL.revokeObjectURL(url);
     });
+
+    // --- Three.js 3D Drone Model Setup ---
+    const droneContainer = document.getElementById('droneContainer');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, droneContainer.clientWidth / droneContainer.clientHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(droneContainer.clientWidth, droneContainer.clientHeight);
+    droneContainer.appendChild(renderer.domElement);
+
+    // Add lights.
+    const ambientLight = new THREE.AmbientLight(0x404040);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(0, 10, 10);
+    scene.add(directionalLight);
+
+    // Create a group for the drone model.
+    const droneGroup = new THREE.Group();
+    scene.add(droneGroup);
+
+    // --- Drone Body as a Long Thin Rod ---
+    // Create a thin rod using a box geometry.
+    // Dimensions: width = 0.2, height = 4, depth = 0.2.
+    // Geometry translated so that the top is at (0, 0, 0) and bottom at y = -4.
+    const bodyGeometry = new THREE.BoxGeometry(0.2, 4, 0.2);
+    bodyGeometry.translate(0, -2, 0);
+    const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x00ff00 });
+    const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    droneGroup.add(bodyMesh);
+
+    // --- Drone Abdomen as a Rectangular Block ---
+    // Create the abdomen as a rectangular block.
+    // New dimensions: width = 0.8 (thinner), height = 0.5, depth = 1 (taller in z axis).
+    const abdomenGeometry = new THREE.BoxGeometry(0.5, 1.5, 0.5);
+    // Translate so that the top is at y = 0.
+    abdomenGeometry.translate(0, -0.25, 0);
+    const abdomenMaterial = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+    const abdomenMesh = new THREE.Mesh(abdomenGeometry, abdomenMaterial);
+    // Position the abdomen so that it hangs from the bottom of the rod (at y = -4).
+    abdomenMesh.position.set(0, -4, 0);
+    bodyMesh.add(abdomenMesh);
+
+    // Position the camera so that the drone model is clearly visible.
+    camera.position.z = 5;
+    camera.position.y = 2;
+    camera.lookAt(droneGroup.position);
+
+    // Animation loop to update the drone model based on sensor data.
+    function animate() {
+      requestAnimationFrame(animate);
+
+      // For the body, swap the axes:
+      // Use globalRollB on the x-axis and globalPitchB on the z-axis.
+      bodyMesh.rotation.x = THREE.MathUtils.degToRad(globalRollB);
+      bodyMesh.rotation.z = THREE.MathUtils.degToRad(globalPitchB);
+
+      // For the abdomen, likewise swap the axes:
+      abdomenMesh.rotation.x = THREE.MathUtils.degToRad(globalRollA);
+      abdomenMesh.rotation.z = THREE.MathUtils.degToRad(globalPitchA);
+
+      renderer.render(scene, camera);
+    }
+    animate();
   </script>
 </body>
 </html>
